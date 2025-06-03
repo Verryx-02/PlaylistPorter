@@ -15,17 +15,17 @@ import (
 )
 
 const (
-	baseURL = "https://api.spt.com/v1"
+	baseURL = "https://api.spotify.com/v1"
 )
 
-// Client represents a SPT API client
+// Client represents a Spotify API client
 type Client struct {
 	config     *config.SPTConfig
 	httpClient *http.Client
 	token      *oauth2.Token
 }
 
-// NewClient creates a new SPT client
+// NewClient creates a new Spotify client
 func NewClient(cfg *config.SPTConfig) (*Client, error) {
 	client := &Client{
 		config: cfg,
@@ -43,9 +43,10 @@ func (c *Client) authenticate() error {
 	cfg := &clientcredentials.Config{
 		ClientID:     c.config.ClientID,
 		ClientSecret: c.config.ClientSecret,
-		TokenURL:     "https://accounts.spt.com/api/token",
+		TokenURL:     "https://accounts.spotify.com/api/token",
 	}
 
+	fmt.Println("🎵 Authenticating with Spotify...")
 	token, err := cfg.Token(context.Background())
 	if err != nil {
 		return fmt.Errorf("getting access token: %w", err)
@@ -53,6 +54,7 @@ func (c *Client) authenticate() error {
 
 	c.token = token
 	c.httpClient = cfg.Client(context.Background())
+	fmt.Println("✅ Spotify authentication successful!")
 
 	return nil
 }
@@ -61,12 +63,12 @@ func (c *Client) authenticate() error {
 func (c *Client) GetPlaylist(playlistID string) (*models.Playlist, error) {
 	url := fmt.Sprintf("%s/playlists/%s", baseURL, playlistID)
 
-	playlist := &sptPlaylist{}
+	playlist := &spotifyPlaylist{}
 	if err := c.makeRequest("GET", url, nil, playlist); err != nil {
 		return nil, err
 	}
 
-	// Fetch all tracks (SPT API paginates results)
+	// Fetch all tracks (Spotify API paginates results)
 	tracks, err := c.getAllPlaylistTracks(playlistID)
 	if err != nil {
 		return nil, fmt.Errorf("fetching playlist tracks: %w", err)
@@ -89,7 +91,7 @@ func (c *Client) getAllPlaylistTracks(playlistID string) ([]models.Track, error)
 	url := fmt.Sprintf("%s/playlists/%s/tracks", baseURL, playlistID)
 
 	for url != "" {
-		response := &sptTracksResponse{}
+		response := &spotifyTracksResponse{}
 		if err := c.makeRequest("GET", url, nil, response); err != nil {
 			return nil, err
 		}
@@ -115,9 +117,9 @@ func (c *Client) getAllPlaylistTracks(playlistID string) ([]models.Track, error)
 	return allTracks, nil
 }
 
-// makeRequest performs an HTTP request to SPT API
-func (c *Client) makeRequest(method, url string, body interface{}, result interface{}) error {
-	req, err := http.NewRequest(method, url, nil)
+// makeRequest performs an HTTP request to Spotify API
+func (c *Client) makeRequest(method, requestURL string, body interface{}, result interface{}) error {
+	req, err := http.NewRequest(method, requestURL, nil)
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -144,7 +146,7 @@ func (c *Client) makeRequest(method, url string, body interface{}, result interf
 
 // Helper functions
 
-func getFirstArtist(artists []sptArtist) string {
+func getFirstArtist(artists []spotifyArtist) string {
 	if len(artists) > 0 {
 		return artists[0].Name
 	}
@@ -167,46 +169,46 @@ func getISRC(externalIDs map[string]string) string {
 	return ""
 }
 
-// SPT API response structures
+// Spotify API response structures
 
-type sptPlaylist struct {
-	ID          string  `json:"id"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Public      bool    `json:"public"`
-	Owner       sptUser `json:"owner"`
+type spotifyPlaylist struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Public      bool        `json:"public"`
+	Owner       spotifyUser `json:"owner"`
 }
 
-type sptUser struct {
+type spotifyUser struct {
 	ID   string `json:"id"`
 	Name string `json:"display_name"`
 }
 
-type sptTracksResponse struct {
-	Items []sptTrackItem `json:"items"`
-	Next  string         `json:"next"`
-	Total int            `json:"total"`
+type spotifyTracksResponse struct {
+	Items []spotifyTrackItem `json:"items"`
+	Next  string             `json:"next"`
+	Total int                `json:"total"`
 }
 
-type sptTrackItem struct {
-	Track sptTrack `json:"track"`
+type spotifyTrackItem struct {
+	Track spotifyTrack `json:"track"`
 }
 
-type sptTrack struct {
+type spotifyTrack struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
-	Artists     []sptArtist       `json:"artists"`
-	Album       sptAlbum          `json:"album"`
+	Artists     []spotifyArtist   `json:"artists"`
+	Album       spotifyAlbum      `json:"album"`
 	DurationMS  int               `json:"duration_ms"`
 	ExternalIDs map[string]string `json:"external_ids"`
 }
 
-type sptArtist struct {
+type spotifyArtist struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
-type sptAlbum struct {
+type spotifyAlbum struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	ReleaseDate string `json:"release_date"`
