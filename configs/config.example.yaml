@@ -1,0 +1,23 @@
+# PlaylistPorter Configuration
+# Copy this file to config.yaml and fill in your API credentials
+
+spt:
+  client_id: "your_spt_client_id_here"
+  client_secret: "your_spt_client_secret_here"
+  redirect_uri: "http://localhost:8080/callback"
+  scopes:
+    - "playlist-read-private"
+    - "playlist-read-collaborative"
+
+tubo:
+  client_id: "your_tubo_client_id_here"
+  client_secret: "your_tubo_client_secret_here"
+  redirect_uri: "http://localhost:8080/callback"
+  scopes:
+    - "https://www.googleapis.com/auth/tubemusic"
+    - "https://www.googleapis.com/auth/tubemusic.readonly"
+
+# Note: 
+# - Get SPT credentials from: https://developer.spt.com/
+# - Get TUBO credentials from: https://console.developers.google.com/
+# - Make sure to enable the TUBO Music API in your Google Cloud Console
