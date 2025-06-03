@@ -27,6 +27,7 @@ type Client struct {
 	config     *config.TUBOConfig
 	httpClient *http.Client
 	token      *oauth2.Token
+	verbose    bool // Add verbose logging
 }
 
 // NewClient creates a new YouTube client
@@ -40,6 +41,11 @@ func NewClient(cfg *config.TUBOConfig) (*Client, error) {
 	}
 
 	return client, nil
+}
+
+// SetVerbose enables detailed logging
+func (c *Client) SetVerbose(verbose bool) {
+	c.verbose = verbose
 }
 
 // authenticate performs OAuth2 authentication for YouTube using HTTP server
@@ -99,27 +105,84 @@ func (c *Client) authenticate() error {
 	return nil
 }
 
-// SearchTrack searches for a track and returns the best match
+// SearchTrack searches for a track using multiple strategies
 func (c *Client) SearchTrack(track models.Track) (*models.Track, float64, error) {
-	// Build search query for music videos
-	query := fmt.Sprintf("%s %s", track.Artist, track.Title)
-
-	searchResults, err := c.search(query, "video")
-	if err != nil {
-		return nil, 0, err
+	// Multiple search strategies in order of preference
+	searchStrategies := []string{
+		fmt.Sprintf("%s %s", track.Artist, track.Title),          // Standard: "Artist Title"
+		fmt.Sprintf("\"%s\" \"%s\"", track.Artist, track.Title),  // Quoted: "Artist" "Title"
+		fmt.Sprintf("%s %s music", track.Artist, track.Title),    // With "music"
+		fmt.Sprintf("%s %s official", track.Artist, track.Title), // With "official"
+		fmt.Sprintf("%s - %s", track.Artist, track.Title),        // With dash
+		track.Title, // Title only
+		fmt.Sprintf("%s %s", track.Title, track.Artist), // Reversed: "Title Artist"
 	}
 
-	if len(searchResults.Items) == 0 {
+	var bestMatch *models.Track
+	var bestScore float64
+	var bestStrategy string
+
+	for i, query := range searchStrategies {
+		if c.verbose {
+			fmt.Printf("    🔍 Strategy %d: \"%s\"\n", i+1, query)
+		}
+
+		searchResults, err := c.search(query, "video")
+		if err != nil {
+			if c.verbose {
+				fmt.Printf("    ❌ Search error: %v\n", err)
+			}
+			continue
+		}
+
+		if len(searchResults.Items) == 0 {
+			if c.verbose {
+				fmt.Printf("    📭 No results found\n")
+			}
+			continue
+		}
+
+		// Find best match in this search
+		match, score := c.findBestMatch(track, searchResults.Items)
+		if c.verbose {
+			if match != nil {
+				fmt.Printf("    📊 Best result: \"%s\" by \"%s\" (score: %.2f)\n",
+					c.cleanVideoTitle(match.Title), match.Artist, score)
+			} else {
+				fmt.Printf("    📊 No decent matches in results\n")
+			}
+		}
+
+		// Update best overall match
+		if score > bestScore {
+			bestScore = score
+			bestMatch = match
+			bestStrategy = fmt.Sprintf("Strategy %d", i+1)
+		}
+
+		// If we found a great match, stop searching
+		if score >= 0.85 {
+			if c.verbose {
+				fmt.Printf("    ✨ Excellent match found, stopping search\n")
+			}
+			break
+		}
+	}
+
+	// Lower minimum threshold from 0.6 to 0.4 for more matches
+	minThreshold := 0.4
+	if bestScore < minThreshold {
+		if c.verbose {
+			fmt.Printf("    ❌ Best score %.2f below threshold %.2f\n", bestScore, minThreshold)
+		}
 		return nil, 0, nil
 	}
 
-	// Find best match using similarity scoring
-	bestMatch, score := c.findBestMatch(track, searchResults.Items)
-	if score < 0.6 { // Lower threshold for YouTube videos
-		return nil, 0, nil
+	if c.verbose && bestMatch != nil {
+		fmt.Printf("    ✅ Selected match using %s (score: %.2f)\n", bestStrategy, bestScore)
 	}
 
-	return bestMatch, score, nil
+	return bestMatch, bestScore, nil
 }
 
 // CreatePlaylist creates a new playlist on YouTube
@@ -149,7 +212,11 @@ func (c *Client) CreatePlaylist(name, description string) (*models.Playlist, err
 
 // AddTracksToPlaylist adds tracks to an existing playlist
 func (c *Client) AddTracksToPlaylist(playlistID string, trackIDs []string) error {
-	for _, trackID := range trackIDs {
+	for i, trackID := range trackIDs {
+		if c.verbose {
+			fmt.Printf("  📝 Adding track %d/%d to playlist...\n", i+1, len(trackIDs))
+		}
+
 		request := youtubePlaylistItemRequest{
 			Snippet: youtubePlaylistItemSnippet{
 				PlaylistID: playlistID,
@@ -175,9 +242,9 @@ func (c *Client) AddTracksToPlaylist(playlistID string, trackIDs []string) error
 func (c *Client) search(query, searchType string) (*youtubeSearchResponse, error) {
 	params := url.Values{}
 	params.Set("part", "snippet")
-	params.Set("q", query+" music") // Add "music" to improve results
+	params.Set("q", query)
 	params.Set("type", searchType)
-	params.Set("maxResults", "10")
+	params.Set("maxResults", "15")      // Increased from 10 to 15
 	params.Set("videoCategoryId", "10") // Music category
 	params.Set("order", "relevance")
 
@@ -191,19 +258,26 @@ func (c *Client) search(query, searchType string) (*youtubeSearchResponse, error
 	return response, nil
 }
 
-// findBestMatch uses similarity scoring to find the best matching track
+// findBestMatch uses improved similarity scoring to find the best matching track
 func (c *Client) findBestMatch(original models.Track, candidates []youtubeSearchItem) (*models.Track, float64) {
 	var bestMatch *models.Track
 	var bestScore float64
 
-	for _, candidate := range candidates {
+	for i, candidate := range candidates {
 		score := c.calculateSimilarity(original, candidate)
+
+		if c.verbose && i < 3 { // Show top 3 candidates
+			cleanTitle := c.cleanVideoTitle(candidate.Snippet.Title)
+			fmt.Printf("      %d. \"%s\" by \"%s\" (score: %.2f)\n",
+				i+1, cleanTitle, candidate.Snippet.ChannelTitle, score)
+		}
+
 		if score > bestScore {
 			bestScore = score
 			bestMatch = &models.Track{
 				ID:     candidate.ID.VideoID,
-				Title:  candidate.Snippet.Title,
-				Artist: candidate.Snippet.ChannelTitle,
+				Title:  c.cleanVideoTitle(candidate.Snippet.Title),
+				Artist: c.cleanChannelTitle(candidate.Snippet.ChannelTitle),
 			}
 		}
 	}
@@ -211,11 +285,13 @@ func (c *Client) findBestMatch(original models.Track, candidates []youtubeSearch
 	return bestMatch, bestScore
 }
 
-// calculateSimilarity calculates similarity score between tracks
+// calculateSimilarity calculates improved similarity score between tracks
 func (c *Client) calculateSimilarity(original models.Track, candidate youtubeSearchItem) float64 {
-	// Clean up YouTube video title (remove common suffixes)
+	// Clean up YouTube video title and channel
 	cleanTitle := c.cleanVideoTitle(candidate.Snippet.Title)
+	cleanChannel := c.cleanChannelTitle(candidate.Snippet.ChannelTitle)
 
+	// Calculate basic similarities
 	titleSim := stringSimilarity(
 		strings.ToLower(original.Title),
 		strings.ToLower(cleanTitle),
@@ -223,34 +299,119 @@ func (c *Client) calculateSimilarity(original models.Track, candidate youtubeSea
 
 	artistSim := stringSimilarity(
 		strings.ToLower(original.Artist),
-		strings.ToLower(candidate.Snippet.ChannelTitle),
+		strings.ToLower(cleanChannel),
 	)
 
-	// Check if the original artist appears in the video title
+	// Bonus points for various matching patterns
+	var bonusScore float64
+
+	// Check if original artist appears in video title
 	if strings.Contains(strings.ToLower(candidate.Snippet.Title), strings.ToLower(original.Artist)) {
-		artistSim += 0.2
+		bonusScore += 0.15
 	}
 
-	// Weighted average: title is more important than artist for YouTube videos
-	return (titleSim * 0.8) + (artistSim * 0.2)
+	// Check if original title appears exactly in video title
+	if strings.Contains(strings.ToLower(candidate.Snippet.Title), strings.ToLower(original.Title)) {
+		bonusScore += 0.10
+	}
+
+	// Bonus for official channels/videos
+	videoTitleLower := strings.ToLower(candidate.Snippet.Title)
+	channelTitleLower := strings.ToLower(candidate.Snippet.ChannelTitle)
+
+	if strings.Contains(videoTitleLower, "official") ||
+		strings.Contains(channelTitleLower, "official") ||
+		strings.Contains(channelTitleLower, "records") ||
+		strings.HasSuffix(channelTitleLower, "vevo") {
+		bonusScore += 0.05
+	}
+
+	// Penalty for covers, live versions, remixes (unless original also mentions them)
+	originalTitleLower := strings.ToLower(original.Title)
+	if (strings.Contains(videoTitleLower, "cover") && !strings.Contains(originalTitleLower, "cover")) ||
+		(strings.Contains(videoTitleLower, "live") && !strings.Contains(originalTitleLower, "live")) ||
+		(strings.Contains(videoTitleLower, "remix") && !strings.Contains(originalTitleLower, "remix")) {
+		bonusScore -= 0.10
+	}
+
+	// Weighted average with bonuses
+	finalScore := (titleSim * 0.7) + (artistSim * 0.3) + bonusScore
+
+	// Cap at 1.0
+	if finalScore > 1.0 {
+		finalScore = 1.0
+	}
+
+	return finalScore
 }
 
 // cleanVideoTitle removes common YouTube video suffixes and prefixes
 func (c *Client) cleanVideoTitle(title string) string {
-	// Common patterns to remove
+	// More comprehensive list of patterns to remove
 	patterns := []string{
 		"(Official Video)", "(Official Music Video)", "(Official Audio)",
-		"(Lyric Video)", "(Lyrics)", "[Official Video]", "[Official Music Video]",
-		"- Official Video", "- Official Music Video", "- Lyric Video",
-		"(HD)", "[HD]", "(4K)", "[4K]", "- YouTube", "| YouTube",
+		"(Official Lyric Video)", "(Official HD Video)",
+		"(Lyric Video)", "(Lyrics)", "(Audio)", "(Video)",
+		"[Official Video]", "[Official Music Video]", "[Official Audio]",
+		"[Lyric Video]", "[Lyrics]", "[Audio]", "[Video]",
+		"- Official Video", "- Official Music Video", "- Official Audio",
+		"- Lyric Video", "- Lyrics", "- Audio",
+		"| Official Video", "| Official Music Video",
+		"(HD)", "[HD]", "(4K)", "[4K]", "(1080p)", "[1080p]",
+		"- YouTube", "| YouTube", "- Topic", "| Topic",
+		"(Full Song)", "[Full Song]", "(Complete)", "[Complete]",
+		"(Music Video)", "[Music Video]", "- Music Video",
+		"(Original)", "[Original]", "- Original",
+		"(HQ)", "[HQ]", "- HQ",
 	}
 
 	cleaned := title
 	for _, pattern := range patterns {
-		cleaned = strings.ReplaceAll(cleaned, pattern, "")
+		// Case insensitive replacement
+		cleaned = replaceCaseInsensitive(cleaned, pattern, "")
 	}
 
-	return strings.TrimSpace(cleaned)
+	// Remove extra whitespace and trim
+	cleaned = strings.TrimSpace(cleaned)
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+
+	return cleaned
+}
+
+// cleanChannelTitle removes common channel suffixes
+func (c *Client) cleanChannelTitle(channel string) string {
+	// Remove common channel suffixes
+	suffixes := []string{"VEVO", "Records", "Music", "Official", "- Topic"}
+
+	cleaned := channel
+	for _, suffix := range suffixes {
+		cleaned = replaceCaseInsensitive(cleaned, suffix, "")
+	}
+
+	// Clean up spacing
+	cleaned = strings.TrimSpace(cleaned)
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+
+	return cleaned
+}
+
+// replaceCaseInsensitive performs case-insensitive string replacement
+func replaceCaseInsensitive(input, old, new string) string {
+	oldLower := strings.ToLower(old)
+	inputLower := strings.ToLower(input)
+
+	for {
+		index := strings.Index(inputLower, oldLower)
+		if index == -1 {
+			break
+		}
+
+		// Replace in original string maintaining case
+		input = input[:index] + new + input[index+len(old):]
+		inputLower = inputLower[:index] + new + inputLower[index+len(old):]
+	}
+
+	return input
 }
 
 // makeRequest performs an HTTP request to YouTube API
@@ -360,7 +521,7 @@ func min(a, b, c int) int {
 	return c
 }
 
-// YouTube API structures
+// YouTube API structures remain the same...
 
 type youtubeSearchResponse struct {
 	Items []youtubeSearchItem `json:"items"`
