@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -27,7 +29,8 @@ type Client struct {
 	config     *config.TUBOConfig
 	httpClient *http.Client
 	token      *oauth2.Token
-	verbose    bool // Add verbose logging
+	verbose    bool        // Add verbose logging
+	logger     *log.Logger // Add file logger
 }
 
 // NewClient creates a new YouTube client
@@ -48,6 +51,18 @@ func (c *Client) SetVerbose(verbose bool) {
 	c.verbose = verbose
 }
 
+// SetLogger sets the file logger for detailed logging
+func (c *Client) SetLogger(logger *log.Logger) {
+	c.logger = logger
+}
+
+// logToFile writes to log file if logger is available
+func (c *Client) logToFile(format string, args ...interface{}) {
+	if c.logger != nil {
+		c.logger.Printf(format, args...)
+	}
+}
+
 // authenticate performs OAuth2 authentication for YouTube using HTTP server
 func (c *Client) authenticate() error {
 	cfg := &oauth2.Config{
@@ -57,6 +72,9 @@ func (c *Client) authenticate() error {
 		Scopes:       c.config.Scopes,
 		Endpoint:     google.Endpoint,
 	}
+
+	// Debug: Print the scopes we're requesting
+	fmt.Printf("🔍 Requesting OAuth scopes: %v\n", c.config.Scopes)
 
 	// Generate authorization URL
 	authURL := cfg.AuthCodeURL("state",
@@ -81,6 +99,7 @@ func (c *Client) authenticate() error {
 	fmt.Println("3. Complete the authorization in your browser")
 	fmt.Println("4. The app will automatically receive the authorization code")
 	fmt.Println("\n💡 If the browser doesn't open automatically, copy the URL above and paste it in your browser")
+	fmt.Println("⚠️  IMPORTANT: Make sure you see 'Manage your YouTube account' permissions in the browser!")
 
 	// Wait for either code or error
 	var authCode string
@@ -101,21 +120,21 @@ func (c *Client) authenticate() error {
 	c.token = token
 	c.httpClient = cfg.Client(context.Background(), token)
 
+	// Debug: Print token info (without exposing the actual token)
+	fmt.Printf("🔍 Token received. Expires: %v\n", token.Expiry)
+	fmt.Printf("🔍 Token type: %s\n", token.TokenType)
+
 	fmt.Println("✅ YouTube authentication successful!")
 	return nil
 }
 
-// SearchTrack searches for a track using multiple strategies
+// SearchTrack searches for a track using optimized strategies (quota-friendly)
 func (c *Client) SearchTrack(track models.Track) (*models.Track, float64, error) {
-	// Multiple search strategies in order of preference
+	// Reduced strategies to save quota - only the most effective ones
 	searchStrategies := []string{
-		fmt.Sprintf("%s %s", track.Artist, track.Title),          // Standard: "Artist Title"
-		fmt.Sprintf("\"%s\" \"%s\"", track.Artist, track.Title),  // Quoted: "Artist" "Title"
-		fmt.Sprintf("%s %s music", track.Artist, track.Title),    // With "music"
-		fmt.Sprintf("%s %s official", track.Artist, track.Title), // With "official"
-		fmt.Sprintf("%s - %s", track.Artist, track.Title),        // With dash
-		track.Title, // Title only
-		fmt.Sprintf("%s %s", track.Title, track.Artist), // Reversed: "Title Artist"
+		fmt.Sprintf("%s %s", track.Artist, track.Title),         // Standard: "Artist Title"
+		fmt.Sprintf("\"%s\" \"%s\"", track.Artist, track.Title), // Quoted: "Artist" "Title"
+		// Removed other strategies to save quota
 	}
 
 	var bestMatch *models.Track
@@ -123,34 +142,26 @@ func (c *Client) SearchTrack(track models.Track) (*models.Track, float64, error)
 	var bestStrategy string
 
 	for i, query := range searchStrategies {
-		if c.verbose {
-			fmt.Printf("    🔍 Strategy %d: \"%s\"\n", i+1, query)
-		}
+		c.logToFile("🔍 Strategy %d: \"%s\"", i+1, query)
 
 		searchResults, err := c.search(query, "video")
 		if err != nil {
-			if c.verbose {
-				fmt.Printf("    ❌ Search error: %v\n", err)
-			}
+			c.logToFile("❌ Search error: %v", err)
 			continue
 		}
 
 		if len(searchResults.Items) == 0 {
-			if c.verbose {
-				fmt.Printf("    📭 No results found\n")
-			}
+			c.logToFile("📭 No results found")
 			continue
 		}
 
 		// Find best match in this search
 		match, score := c.findBestMatch(track, searchResults.Items)
-		if c.verbose {
-			if match != nil {
-				fmt.Printf("    📊 Best result: \"%s\" by \"%s\" (score: %.2f)\n",
-					c.cleanVideoTitle(match.Title), match.Artist, score)
-			} else {
-				fmt.Printf("    📊 No decent matches in results\n")
-			}
+		if match != nil {
+			c.logToFile("📊 Best result: \"%s\" by \"%s\" (score: %.2f)",
+				c.cleanVideoTitle(match.Title), match.Artist, score)
+		} else {
+			c.logToFile("📊 No decent matches in results")
 		}
 
 		// Update best overall match
@@ -160,26 +171,22 @@ func (c *Client) SearchTrack(track models.Track) (*models.Track, float64, error)
 			bestStrategy = fmt.Sprintf("Strategy %d", i+1)
 		}
 
-		// If we found a great match, stop searching
-		if score >= 0.85 {
-			if c.verbose {
-				fmt.Printf("    ✨ Excellent match found, stopping search\n")
-			}
+		// If we found a good match, stop searching to save quota
+		if score >= 0.75 { // Increased threshold to stop earlier
+			c.logToFile("✨ Good match found, stopping search to save quota")
 			break
 		}
 	}
 
-	// Lower minimum threshold from 0.6 to 0.4 for more matches
-	minThreshold := 0.4
+	// Lower minimum threshold but prioritize quota savings
+	minThreshold := 0.5
 	if bestScore < minThreshold {
-		if c.verbose {
-			fmt.Printf("    ❌ Best score %.2f below threshold %.2f\n", bestScore, minThreshold)
-		}
+		c.logToFile("❌ Best score %.2f below threshold %.2f", bestScore, minThreshold)
 		return nil, 0, nil
 	}
 
-	if c.verbose && bestMatch != nil {
-		fmt.Printf("    ✅ Selected match using %s (score: %.2f)\n", bestStrategy, bestScore)
+	if bestMatch != nil {
+		c.logToFile("✅ Selected match using %s (score: %.2f)", bestStrategy, bestScore)
 	}
 
 	return bestMatch, bestScore, nil
@@ -197,6 +204,10 @@ func (c *Client) CreatePlaylist(name, description string) (*models.Playlist, err
 		},
 	}
 
+	// Debug: Print request details
+	fmt.Printf("🔍 Creating playlist: \"%s\"\n", name)
+	fmt.Printf("🔍 Request body: %+v\n", request)
+
 	response := &youtubePlaylistResponse{}
 	if err := c.makeRequest("POST", baseURL+"/playlists?part=snippet,status", request, response); err != nil {
 		return nil, err
@@ -213,9 +224,7 @@ func (c *Client) CreatePlaylist(name, description string) (*models.Playlist, err
 // AddTracksToPlaylist adds tracks to an existing playlist
 func (c *Client) AddTracksToPlaylist(playlistID string, trackIDs []string) error {
 	for i, trackID := range trackIDs {
-		if c.verbose {
-			fmt.Printf("  📝 Adding track %d/%d to playlist...\n", i+1, len(trackIDs))
-		}
+		c.logToFile("📝 Adding track %d/%d to playlist (Video ID: %s)", i+1, len(trackIDs), trackID)
 
 		request := youtubePlaylistItemRequest{
 			Snippet: youtubePlaylistItemSnippet{
@@ -266,9 +275,9 @@ func (c *Client) findBestMatch(original models.Track, candidates []youtubeSearch
 	for i, candidate := range candidates {
 		score := c.calculateSimilarity(original, candidate)
 
-		if c.verbose && i < 3 { // Show top 3 candidates
+		if i < 3 { // Show top 3 candidates in log
 			cleanTitle := c.cleanVideoTitle(candidate.Snippet.Title)
-			fmt.Printf("      %d. \"%s\" by \"%s\" (score: %.2f)\n",
+			c.logToFile("   %d. \"%s\" by \"%s\" (score: %.2f)",
 				i+1, cleanTitle, candidate.Snippet.ChannelTitle, score)
 		}
 
@@ -435,18 +444,36 @@ func (c *Client) makeRequest(method, requestURL string, body interface{}, result
 	req.Header.Set("Authorization", "Bearer "+c.token.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
 
+	// Debug: Print request details (without exposing token)
+	fmt.Printf("🔍 Making %s request to: %s\n", method, requestURL)
+	if body != nil {
+		fmt.Printf("🔍 Request body: %s\n", string(reqBody))
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("executing request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("API request failed with status %d", resp.StatusCode)
+	// Read response body once for both debugging and processing
+	var respBodyBytes []byte
+	if resp.Body != nil {
+		respBodyBytes, _ = io.ReadAll(resp.Body)
 	}
 
-	if result != nil {
-		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+	fmt.Printf("🔍 Response status: %d\n", resp.StatusCode)
+	if len(respBodyBytes) > 0 {
+		fmt.Printf("🔍 Response body: %s\n", string(respBodyBytes))
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("API request failed with status %d. URL: %s, Response: %s",
+			resp.StatusCode, requestURL, string(respBodyBytes))
+	}
+
+	if result != nil && len(respBodyBytes) > 0 {
+		if err := json.Unmarshal(respBodyBytes, result); err != nil {
 			return fmt.Errorf("decoding response: %w", err)
 		}
 	}

@@ -249,8 +249,15 @@ func (o *Orchestrator) matchTracks(tracks []models.Track) ([]models.MatchResult,
 
 // createTUBOPlaylist creates the playlist on YouTube
 func (o *Orchestrator) createTUBOPlaylist(originalPlaylist *models.Playlist, matchResults []models.MatchResult) (*models.Playlist, error) {
+	// Use completely different name to avoid any cache issues
+	timestamp := time.Now().Format("2006-01-02 15:04")
+	playlistName := fmt.Sprintf("PlaylistPorter Test %s", timestamp)
+	description := fmt.Sprintf("Migrated from Spotify playlist: %s", originalPlaylist.Name)
+
+	fmt.Printf("🔧 Creating playlist with test name: \"%s\"\n", playlistName)
+
 	// Create empty playlist
-	tuboPlaylist, err := o.tuboClient.CreatePlaylist(originalPlaylist.Name, originalPlaylist.Description)
+	tuboPlaylist, err := o.tuboClient.CreatePlaylist(playlistName, description)
 	if err != nil {
 		return nil, fmt.Errorf("creating playlist: %w", err)
 	}
