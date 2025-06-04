@@ -1,2 +1,4 @@
 # OS files
 .DS_Store
+PlaylistPorter/bin
+PlaylistPorter/configs/config.yaml

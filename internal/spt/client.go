@@ -47,7 +47,7 @@ func (c *Client) authenticate() error {
 		TokenURL:     "https://accounts.spotify.com/api/token",
 	}
 
-	fmt.Println("🎵 Authenticating with Spotify...")
+	fmt.Println("Authenticating with Spotify...")
 	token, err := cfg.Token(context.Background())
 	if err != nil {
 		return fmt.Errorf("getting access token: %w", err)
@@ -55,7 +55,7 @@ func (c *Client) authenticate() error {
 
 	c.token = token
 	c.httpClient = cfg.Client(context.Background())
-	fmt.Println("✅ Spotify authentication successful!")
+	fmt.Println("Spotify authentication successful!")
 
 	return nil
 }

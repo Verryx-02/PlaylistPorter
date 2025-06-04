@@ -10,7 +10,7 @@ import (
 func StartHTTPServer(port string, codeChan chan string, errChan chan error) {
 	// Setup HTTP handler
 	http.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("📨 Received callback request: %s\n", r.URL.String())
+		fmt.Printf("Received callback request: %s\n", r.URL.String())
 
 		code := r.URL.Query().Get("code")
 		if code == "" {
@@ -62,7 +62,7 @@ func StartHTTPServer(port string, codeChan chan string, errChan chan error) {
 			</head>
 			<body>
 				<div class="container">
-					<div class="success">✅ Authorization Successful!</div>
+					<div class="success">Authorization Successful!</div>
 					<div class="message">
 						Your playlist migration can now continue.<br><br>
 						<strong>You can close this browser window</strong> and return to the terminal.
@@ -73,7 +73,7 @@ func StartHTTPServer(port string, codeChan chan string, errChan chan error) {
 		`))
 
 		// Send code to channel
-		fmt.Printf("📤 Sending authorization code to channel\n")
+		fmt.Printf("Sending authorization code to channel\n")
 		codeChan <- code
 	})
 
@@ -89,7 +89,7 @@ func StartHTTPServer(port string, codeChan chan string, errChan chan error) {
 					<h1>🎵 PlaylistPorter OAuth Server</h1>
 					<p>This server is running and waiting for OAuth callbacks.</p>
 					<p>Callback endpoint: <code>http://localhost:8080/callback</code></p>
-					<p>Status: <span style="color: green;">✅ Ready</span></p>
+					<p>Status: <span style="color: green;">Ready</span></p>
 				</body>
 				</html>
 			`))
@@ -105,8 +105,8 @@ func StartHTTPServer(port string, codeChan chan string, errChan chan error) {
 		WriteTimeout: 30 * time.Second,
 	}
 
-	fmt.Printf("🌐 Starting HTTP server on http://localhost:%s\n", port)
-	fmt.Printf("📋 Callback URL: http://localhost:%s/callback\n", port)
+	fmt.Printf("Starting HTTP server on http://localhost:%s\n", port)
+	fmt.Printf("Callback URL: http://localhost:%s/callback\n", port)
 
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		errChan <- fmt.Errorf("HTTP server error: %w", err)

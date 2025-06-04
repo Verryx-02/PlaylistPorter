@@ -74,14 +74,14 @@ func (c *Client) authenticate() error {
 	}
 
 	// Debug: Print the scopes we're requesting
-	fmt.Printf("🔍 Requesting OAuth scopes: %v\n", c.config.Scopes)
+	fmt.Printf("Requesting OAuth scopes: %v\n", c.config.Scopes)
 
 	// Generate authorization URL
 	authURL := cfg.AuthCodeURL("state",
 		oauth2.AccessTypeOffline,
 		oauth2.ApprovalForce)
 
-	fmt.Println("\n🔐 YouTube Authentication Required")
+	fmt.Println("\nYouTube Authentication Required")
 	fmt.Println("=====================================")
 	fmt.Printf("1. Starting local HTTP server...\n")
 
@@ -98,14 +98,14 @@ func (c *Client) authenticate() error {
 	fmt.Printf("2. Opening authorization URL in browser:\n\n%s\n\n", authURL)
 	fmt.Println("3. Complete the authorization in your browser")
 	fmt.Println("4. The app will automatically receive the authorization code")
-	fmt.Println("\n💡 If the browser doesn't open automatically, copy the URL above and paste it in your browser")
-	fmt.Println("⚠️  IMPORTANT: Make sure you see 'Manage your YouTube account' permissions in the browser!")
+	fmt.Println("\nIf the browser doesn't open automatically, copy the URL above and paste it in your browser")
+	fmt.Println("IMPORTANT: Make sure you see 'Manage your YouTube account' permissions in the browser!")
 
 	// Wait for either code or error
 	var authCode string
 	select {
 	case authCode = <-codeChan:
-		fmt.Println("✅ Authorization code received!")
+		fmt.Println("Authorization code received!")
 	case err := <-errChan:
 		return fmt.Errorf("HTTP server error: %w", err)
 	case <-time.After(5 * time.Minute):
@@ -121,10 +121,10 @@ func (c *Client) authenticate() error {
 	c.httpClient = cfg.Client(context.Background(), token)
 
 	// Debug: Print token info (without exposing the actual token)
-	fmt.Printf("🔍 Token received. Expires: %v\n", token.Expiry)
-	fmt.Printf("🔍 Token type: %s\n", token.TokenType)
+	fmt.Printf("Token received. Expires: %v\n", token.Expiry)
+	fmt.Printf("Token type: %s\n", token.TokenType)
 
-	fmt.Println("✅ YouTube authentication successful!")
+	fmt.Println("YouTube authentication successful!")
 	return nil
 }
 
@@ -142,26 +142,26 @@ func (c *Client) SearchTrack(track models.Track) (*models.Track, float64, error)
 	var bestStrategy string
 
 	for i, query := range searchStrategies {
-		c.logToFile("🔍 Strategy %d: \"%s\"", i+1, query)
+		c.logToFile("Strategy %d: \"%s\"", i+1, query)
 
 		searchResults, err := c.search(query, "video")
 		if err != nil {
-			c.logToFile("❌ Search error: %v", err)
+			c.logToFile("Search error: %v", err)
 			continue
 		}
 
 		if len(searchResults.Items) == 0 {
-			c.logToFile("📭 No results found")
+			c.logToFile("No results found")
 			continue
 		}
 
 		// Find best match in this search
 		match, score := c.findBestMatch(track, searchResults.Items)
 		if match != nil {
-			c.logToFile("📊 Best result: \"%s\" by \"%s\" (score: %.2f)",
+			c.logToFile("Best result: \"%s\" by \"%s\" (score: %.2f)",
 				c.cleanVideoTitle(match.Title), match.Artist, score)
 		} else {
-			c.logToFile("📊 No decent matches in results")
+			c.logToFile("No decent matches in results")
 		}
 
 		// Update best overall match
@@ -173,7 +173,7 @@ func (c *Client) SearchTrack(track models.Track) (*models.Track, float64, error)
 
 		// If we found a good match, stop searching to save quota
 		if score >= 0.75 { // Increased threshold to stop earlier
-			c.logToFile("✨ Good match found, stopping search to save quota")
+			c.logToFile("Good match found, stopping search to save quota")
 			break
 		}
 	}
@@ -181,12 +181,12 @@ func (c *Client) SearchTrack(track models.Track) (*models.Track, float64, error)
 	// Lower minimum threshold but prioritize quota savings
 	minThreshold := 0.5
 	if bestScore < minThreshold {
-		c.logToFile("❌ Best score %.2f below threshold %.2f", bestScore, minThreshold)
+		c.logToFile("Best score %.2f below threshold %.2f", bestScore, minThreshold)
 		return nil, 0, nil
 	}
 
 	if bestMatch != nil {
-		c.logToFile("✅ Selected match using %s (score: %.2f)", bestStrategy, bestScore)
+		c.logToFile("Selected match using %s (score: %.2f)", bestStrategy, bestScore)
 	}
 
 	return bestMatch, bestScore, nil
@@ -205,8 +205,8 @@ func (c *Client) CreatePlaylist(name, description string) (*models.Playlist, err
 	}
 
 	// Debug: Print request details
-	fmt.Printf("🔍 Creating playlist: \"%s\"\n", name)
-	fmt.Printf("🔍 Request body: %+v\n", request)
+	fmt.Printf("Creating playlist: \"%s\"\n", name)
+	fmt.Printf("Request body: %+v\n", request)
 
 	response := &youtubePlaylistResponse{}
 	if err := c.makeRequest("POST", baseURL+"/playlists?part=snippet,status", request, response); err != nil {
@@ -224,7 +224,7 @@ func (c *Client) CreatePlaylist(name, description string) (*models.Playlist, err
 // AddTracksToPlaylist adds tracks to an existing playlist
 func (c *Client) AddTracksToPlaylist(playlistID string, trackIDs []string) error {
 	for i, trackID := range trackIDs {
-		c.logToFile("📝 Adding track %d/%d to playlist (Video ID: %s)", i+1, len(trackIDs), trackID)
+		c.logToFile("Adding track %d/%d to playlist (Video ID: %s)", i+1, len(trackIDs), trackID)
 
 		request := youtubePlaylistItemRequest{
 			Snippet: youtubePlaylistItemSnippet{
@@ -445,9 +445,9 @@ func (c *Client) makeRequest(method, requestURL string, body interface{}, result
 	req.Header.Set("Content-Type", "application/json")
 
 	// Debug: Print request details (without exposing token)
-	fmt.Printf("🔍 Making %s request to: %s\n", method, requestURL)
+	fmt.Printf("Making %s request to: %s\n", method, requestURL)
 	if body != nil {
-		fmt.Printf("🔍 Request body: %s\n", string(reqBody))
+		fmt.Printf("Request body: %s\n", string(reqBody))
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -462,9 +462,9 @@ func (c *Client) makeRequest(method, requestURL string, body interface{}, result
 		respBodyBytes, _ = io.ReadAll(resp.Body)
 	}
 
-	fmt.Printf("🔍 Response status: %d\n", resp.StatusCode)
+	fmt.Printf("Response status: %d\n", resp.StatusCode)
 	if len(respBodyBytes) > 0 {
-		fmt.Printf("🔍 Response body: %s\n", string(respBodyBytes))
+		fmt.Printf("Response body: %s\n", string(respBodyBytes))
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
