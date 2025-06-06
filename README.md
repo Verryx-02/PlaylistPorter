@@ -1,3 +1,5 @@
+## WORK IN PROGRESS. DOON'T USE IT
+
 ### Keeping Playlists in Sync
 
 PlaylistPorter can detect and sync new tracks added to Spotify playlists after the initial porting:
